@@ -44,7 +44,7 @@ class SelfTestTest {
     private fun write(path: String, text: String) = File(work, path).apply { parentFile.mkdirs(); writeText(text) }
 
     /** A committed and pushed repo with the files the sabotages look for; origin set to a GitHub URL. */
-    private fun pushedRepo(device: String = "actions", manifest: String = MANIFEST, seed: String = SEED, links: String = LINKS) {
+    private fun pushedRepo(device: String = "actions", manifest: String = MANIFEST, seed: String = SEED, links: String = LINKS, readme: String = "Run `scripts/check` and `scripts/check --fast`; `scripts/check-trimmer` is separate.\n") {
         val bare = File(dir, "remote.git")
         git("init", "-q", "--bare", bare.path, cwd = dir)
         git("init", "-q", "-b", "stage-x", work.path, cwd = dir)
@@ -52,6 +52,7 @@ class SelfTestTest {
         write(Sabotage.MANIFEST, manifest)
         write(Sabotage.SEED, seed)
         write(Sabotage.LINKS, links)
+        write(Sabotage.README, readme)
         write("${Sabotage.CORE_TEST_DIR}/SomeTest.kt", "package x\n")
         write(".gitignore", "build/\n")
         git("add", "-A"); git("commit", "-q", "-m", "one")
@@ -70,6 +71,7 @@ class SelfTestTest {
                 "backup" to manifest.contains(Sabotage.BACKUP_ON),
                 "dupid" to File(clone, Sabotage.SEED).readText().let { t -> ID.findAll(t).map { it.groupValues[1] }.toList().let { it.size != it.toSet().size } },
                 "badlink" to File(clone, Sabotage.LINKS).readText().contains("no-such-region"),
+                "noreadme" to !File(clone, Sabotage.README).readText().contains("scripts/check`"),
                 "leftover" to File(clone, "build/leftover.txt").isFile,
             )
             calls += args to state
@@ -86,6 +88,7 @@ class SelfTestTest {
                 if (state["dupid"] == true) failures += "seed: SEED_ID_DUP lists[0].values[1].id (planted)"
                 if (state["badlink"] == true) failures += "seed: LINKS_REGION_UNKNOWN links[0].region (planted)"
             }
+            if (only == null || "docs" in only) if (state["noreadme"] == true) failures += "docs: DOCS_SCRIPT_MISSING check"
             val name = if (only == null) "clean" else only
             override(name) ?: run {
                 val pass = failures.isEmpty() && (only != null || cleanPass)
@@ -109,40 +112,43 @@ class SelfTestTest {
     }
 
     @Test
-    fun everyRunAsExpectedPassesSixOfSixWithTheCloneDeleted() {
+    fun everyRunAsExpectedPassesSevenOfSevenWithTheCloneDeleted() {
         pushedRepo()
         val (code, lines) = selftest(fakeCheck())
         assertEquals(lines.joinToString("\n"), 0, code)
-        assertEquals(7, lines.size)
+        assertEquals(8, lines.size)
         assertEquals("selftest clean                PASS (as expected)", lines[0])
         assertEquals("selftest failing-test         FAIL unit UNIT …SelfTestSabotage.fails (as expected)", lines[1])
         assertEquals("selftest internet             FAIL manifest MANIFEST_DENIED android.permission.INTERNET (release, debug) (as expected)", lines[2])
         assertEquals("selftest allow-backup         FAIL manifest MANIFEST_BACKUP (as expected)", lines[3])
         assertEquals("selftest seed-dup-id          FAIL seed SEED_ID_DUP lists[0].values[1].id (planted) (as expected)", lines[4])
         assertEquals("selftest ${"links-unknown-region".padEnd(20)} FAIL seed LINKS_REGION_UNKNOWN links[0].region (planted) (as expected)", lines[5])
-        assertTrue(lines[6], Regex("SELFTEST PASS  6/6  time=\\d+m\\d\\ds").matches(lines[6]))
+        assertEquals("selftest readme               FAIL docs DOCS_SCRIPT_MISSING check (as expected)", lines[6])
+        assertTrue(lines[7], Regex("SELFTEST PASS  7/7  time=\\d+m\\d\\ds").matches(lines[7]))
     }
 
     @Test
     fun theCleanRunIsTheFullCheckWithASeedAndEachSabotageRunsOnlyItsPhasesOnAResetClone() {
         pushedRepo()
         selftest(fakeCheck())
-        assertEquals(6, calls.size)
+        assertEquals(7, calls.size)
         assertEquals("--seed", calls[0].first[0]); assertEquals(2, calls[0].first.size); calls[0].first[1].toLong()
         assertEquals(listOf("--only", "unit"), calls[1].first)
         assertEquals(listOf("--only", "build,manifest"), calls[2].first)
         assertEquals(listOf("--only", "build,manifest"), calls[3].first)
         assertEquals(listOf("--only", "seed"), calls[4].first)
         assertEquals(listOf("--only", "seed"), calls[5].first)
+        assertEquals(listOf("--only", "docs"), calls[6].first)
         // nothing planted in the clean run; each sabotage alone in its own run (the one before was reset)
-        assertEquals(mapOf("test" to false, "internet" to false, "backup" to false, "dupid" to false, "badlink" to false, "leftover" to false), calls[0].second)
-        assertEquals(mapOf("test" to true, "internet" to false, "backup" to false, "dupid" to false, "badlink" to false, "leftover" to true), calls[1].second)
-        assertEquals(mapOf("test" to false, "internet" to true, "backup" to false, "dupid" to false, "badlink" to false, "leftover" to true), calls[2].second)
-        assertEquals(mapOf("test" to false, "internet" to false, "backup" to true, "dupid" to false, "badlink" to false, "leftover" to true), calls[3].second)
-        assertEquals(mapOf("test" to false, "internet" to false, "backup" to false, "dupid" to true, "badlink" to false, "leftover" to true), calls[4].second)
-        assertEquals(mapOf("test" to false, "internet" to false, "backup" to false, "dupid" to false, "badlink" to true, "leftover" to true), calls[5].second)
+        assertEquals(mapOf("test" to false, "internet" to false, "backup" to false, "dupid" to false, "badlink" to false, "noreadme" to false, "leftover" to false), calls[0].second)
+        assertEquals(mapOf("test" to true, "internet" to false, "backup" to false, "dupid" to false, "badlink" to false, "noreadme" to false, "leftover" to true), calls[1].second)
+        assertEquals(mapOf("test" to false, "internet" to true, "backup" to false, "dupid" to false, "badlink" to false, "noreadme" to false, "leftover" to true), calls[2].second)
+        assertEquals(mapOf("test" to false, "internet" to false, "backup" to true, "dupid" to false, "badlink" to false, "noreadme" to false, "leftover" to true), calls[3].second)
+        assertEquals(mapOf("test" to false, "internet" to false, "backup" to false, "dupid" to true, "badlink" to false, "noreadme" to false, "leftover" to true), calls[4].second)
+        assertEquals(mapOf("test" to false, "internet" to false, "backup" to false, "dupid" to false, "badlink" to true, "noreadme" to false, "leftover" to true), calls[5].second)
+        assertEquals(mapOf("test" to false, "internet" to false, "backup" to false, "dupid" to false, "badlink" to false, "noreadme" to true, "leftover" to true), calls[6].second)
         // the clone keeps the repo's origin, so env and device see the same remote
-        assertEquals(List(6) { "https://github.com/$owner/$repo.git" }, origins)
+        assertEquals(List(7) { "https://github.com/$owner/$repo.git" }, origins)
         // the repo itself is untouched
         assertEquals("", git("status", "--porcelain"))
     }
@@ -180,7 +186,7 @@ class SelfTestTest {
         })
         assertEquals(1, code)
         assertEquals("selftest failing-test         CHECK PASS (only: unit)  place=cloud  … (expected FAIL unit UNIT; see build/check/selftest-failing-test.log)", lines[1])
-        assertTrue(lines.last(), lines.last().startsWith("SELFTEST FAIL  5/6  time="))
+        assertTrue(lines.last(), lines.last().startsWith("SELFTEST FAIL  6/7  time="))
         assertTrue(lines.last(), lines.last().endsWith("not as expected: failing-test"))
     }
 
@@ -193,7 +199,7 @@ class SelfTestTest {
         assertEquals(1, code)
         assertTrue(lines[2], lines[2].startsWith("selftest internet             FAIL build: BUILD e: something (expected FAIL manifest MANIFEST_DENIED android.permission.INTERNET;"))
         assertTrue(lines[3], lines[3].contains("(expected FAIL manifest MANIFEST_BACKUP;"))
-        assertTrue(lines.last(), lines.last().startsWith("SELFTEST FAIL  4/6") && lines.last().endsWith("internet, allow-backup"))
+        assertTrue(lines.last(), lines.last().startsWith("SELFTEST FAIL  5/7") && lines.last().endsWith("internet, allow-backup"))
     }
 
     @Test
@@ -222,7 +228,7 @@ class SelfTestTest {
         val (code, lines) = selftest(fakeCheck(cleanPass = false))
         assertEquals(1, code)
         assertTrue(lines[0], lines[0].startsWith("selftest clean                CHECK FAIL  place=cloud  … (expected PASS; seed="))
-        assertTrue(lines.last(), lines.last().startsWith("SELFTEST FAIL  5/6") && lines.last().endsWith("not as expected: clean"))
+        assertTrue(lines.last(), lines.last().startsWith("SELFTEST FAIL  6/7") && lines.last().endsWith("not as expected: clean"))
     }
 
     @Test
@@ -231,7 +237,7 @@ class SelfTestTest {
         val (code, lines) = selftest(fakeCheck())
         assertEquals(1, code)
         assertEquals("selftest allow-backup         SELFTEST_ANCHOR allow-backup", lines[3])
-        assertEquals(5, calls.size) // no check is run for a sabotage that could not be planted
+        assertEquals(6, calls.size) // no check is run for a sabotage that could not be planted
         assertTrue(lines.last(), lines.last().endsWith("not as expected: allow-backup"))
     }
 
@@ -241,7 +247,7 @@ class SelfTestTest {
         val (code, lines) = selftest(fakeCheck())
         assertEquals(1, code)
         assertEquals("selftest seed-dup-id          SELFTEST_ANCHOR seed-dup-id", lines[4])
-        assertEquals(5, calls.size)
+        assertEquals(6, calls.size)
     }
 
     @Test
@@ -250,7 +256,16 @@ class SelfTestTest {
         val (code, lines) = selftest(fakeCheck())
         assertEquals(1, code)
         assertEquals("selftest ${"links-unknown-region".padEnd(20)} SELFTEST_ANCHOR links-unknown-region", lines[5])
-        assertEquals(5, calls.size)
+        assertEquals(6, calls.size)
+    }
+
+    @Test
+    fun aReadmeWithoutScriptsCheckIsSelftestAnchorForReadme() {
+        pushedRepo(readme = "Nothing about the check here.\n")
+        val (code, lines) = selftest(fakeCheck())
+        assertEquals(1, code)
+        assertEquals("selftest readme               SELFTEST_ANCHOR readme", lines[6])
+        assertEquals(6, calls.size)
     }
 
     @Test

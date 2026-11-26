@@ -18,7 +18,7 @@ class DocsRulesTest {
 
     @After fun clean() { root.deleteRecursively() }
 
-    private fun good() = "# Title\n" + names.joinToString("\n") { "- `scripts/$it` or `scripts/$it --flag`" } + "\nSeed: `${DocsRules.SEED_PATH}`.\n"
+    private fun good() = "# Title\n" + names.joinToString("\n") { "- `scripts/$it` or `scripts/$it --flag`" } + "\nSeed: `${DocsRules.SEED_PATH}`. Drawing: `${DocsRules.DRAWING_PATH}`, links: `${DocsRules.LINKS_PATH}`.\n"
 
     @Test
     fun aReadmeNamingEveryScriptAndTheSeedPathPasses() {
@@ -49,5 +49,17 @@ class DocsRulesTest {
     fun noSeedPathIsDocsSeedPath() {
         readme.writeText(good().replace(DocsRules.SEED_PATH, "the seed file"))
         assertEquals(listOf("DOCS_SEED_PATH"), DocsRules.check(root))
+    }
+
+    @Test
+    fun noDrawingPathIsDocsDrawingPath() {
+        readme.writeText(good().replace(DocsRules.DRAWING_PATH, "the drawing"))
+        assertEquals(listOf("DOCS_DRAWING_PATH"), DocsRules.check(root))
+    }
+
+    @Test
+    fun noLinkFilePathIsDocsDrawingPath() {
+        readme.writeText(good().replace(DocsRules.LINKS_PATH, "the link file"))
+        assertEquals(listOf("DOCS_DRAWING_PATH"), DocsRules.check(root))
     }
 }

@@ -83,17 +83,21 @@ class ZoomTest {
             waitSelected(compose, "value:${other.valueId}")
 
             // Pinch in around the point (the fingers kept on the canvas), then drag the picture a little towards the middle.
+            // pinch() takes each finger's start then end: the left finger goes out to the left and the right one out to the
+            // right, so they move apart (about 2.75 times; less the touch slop) and never cross.
             val at = pixelOf(compose, p.x, p.y)
             val centre = Offset(at.x.coerceIn(120f, canvas.width - 120f), at.y.coerceIn(120f, canvas.height - 120f))
             compose.onNodeWithCanvas().performTouchInput {
                 pinch(
-                    Offset(centre.x - 40f, centre.y), Offset(centre.x + 40f, centre.y),
-                    Offset(centre.x - 110f, centre.y), Offset(centre.x + 110f, centre.y),
+                    start0 = Offset(centre.x - 40f, centre.y), end0 = Offset(centre.x - 110f, centre.y),
+                    start1 = Offset(centre.x + 40f, centre.y), end1 = Offset(centre.x + 110f, centre.y),
                 )
             }
             compose.waitLabelled("the pinch to zoom in (zoom is ${DrawingTestSupport.view(compose).zoom})") { DrawingTestSupport.view(compose).zoom > 1.2 }
             val zoomed = DrawingTestSupport.view(compose)
             assertTrue("zoom ${zoomed.zoom}", zoomed.zoom > 1.2)
+            // Fingers moving apart from 80 to 220 pixels cannot zoom by more than 2.75 (crossed fingers used to hit the 6x limit).
+            assertTrue("the pinch zoomed more than the fingers moved apart (zoom ${zoomed.zoom})", zoomed.zoom <= 220.0 / 80.0 + 0.01)
             // The point may have moved off the canvas (the fingers were kept on it, the point may not be): drag it back in.
             repeat(8) {
                 val where = pixelOf(compose, p.x, p.y)
@@ -107,9 +111,15 @@ class ZoomTest {
             }
             val now = pixelOf(compose, p.x, p.y)
             val middle = Offset(canvas.width / 2f, canvas.height / 2f)
-            val step = Offset((middle.x - now.x).coerceIn(-40f, 40f), (middle.y - now.y).coerceIn(-40f, 40f))
+            // A drag towards the middle, long enough to get past the touch slop (it is bigger on some devices than others).
+            val toward = middle - now
             val from = Offset(middle.x, middle.y)
-            compose.onNodeWithCanvas().performTouchInput { swipe(from, from + step, 300) }
+            var step = Offset.Zero
+            compose.onNodeWithCanvas().performTouchInput {
+                val length = maxOf(40f, viewConfiguration.touchSlop * 2f + 8f)
+                step = if (toward.getDistance() < 1f) Offset.Zero else toward * (length / toward.getDistance())
+                swipe(from, from + step, 300)
+            }
             val moved = pixelOf(compose, p.x, p.y)
             assertTrue("the point is on the canvas after the drag ($moved)", onCanvas(compose, moved))
             assertTrue("the picture did not move", DrawingTestSupport.view(compose).let { it.offsetX != zoomed.offsetX || it.offsetY != zoomed.offsetY } || step == Offset.Zero)

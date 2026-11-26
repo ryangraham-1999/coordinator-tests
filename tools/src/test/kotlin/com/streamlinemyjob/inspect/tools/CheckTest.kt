@@ -45,7 +45,7 @@ class CheckTest {
         File(root, "app/src/main/res/xml/data_extraction_rules.xml").writeText(Fixtures.extractionRules())
         File(root, "scripts").mkdirs()
         File(root, "scripts/check").writeText("#!/bin/sh\n")
-        File(root, "README.md").writeText("`scripts/check`\n${DocsRules.SEED_PATH}\n")
+        File(root, "README.md").writeText("`scripts/check`\n${DocsRules.SEED_PATH}\n${DocsRules.DRAWING_PATH}\n${DocsRules.LINKS_PATH}\n")
     }
 
     @After fun clean() { dir.deleteRecursively() }

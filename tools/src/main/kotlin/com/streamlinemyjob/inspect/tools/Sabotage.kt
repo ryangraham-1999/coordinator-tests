@@ -34,6 +34,7 @@ class Sabotage(
     companion object {
         const val MANIFEST = "app/src/main/AndroidManifest.xml"
         const val SEED = "app/src/main/assets/seed/lists.json"
+        const val README = "README.md"
         const val LINKS = "app/src/main/assets/drawing/links.json"
         const val CORE_TEST_DIR = "core/src/test/kotlin/com/streamlinemyjob/inspect/core"
         const val SABOTAGE_CLASS = "SelfTestSabotage"
@@ -45,7 +46,7 @@ class Sabotage(
         private val ID_FIELD = Regex("\"id\"\\s*:\\s*\"([^\"\\\\]*)\"")
         private val REGION_FIELD = Regex("(\"region\"\\s*:\\s*\")[^\"\\\\]*")
 
-        /** The sabotages added so far (S1.6, S1.7, S1.26), in the order 4.6's table lists them. */
+        /** The sabotages added so far (S1.6, S1.7, S1.26, S1.14), in the order 4.6's table lists them. */
         val ALL: List<Sabotage> = listOf(
             Sabotage("failing-test", listOf("unit"), "unit", "UNIT", mentions = SABOTAGE_CLASS) { root ->
                 val dir = File(root, CORE_TEST_DIR)
@@ -82,6 +83,9 @@ class Sabotage(
             },
             Sabotage("links-unknown-region", listOf("seed"), "seed", "LINKS_REGION_UNKNOWN") { root ->
                 edit(File(root, LINKS)) { text -> firstRegionUnknown(text) }
+            },
+            Sabotage("readme", listOf("docs"), "docs", "DOCS_SCRIPT_MISSING check") { root ->
+                edit(File(root, README)) { text -> if (text.contains("scripts/check")) text.replace(Regex("scripts/check(?![-\\w])"), "") else null }
             },
         )
 

@@ -76,11 +76,18 @@ class OverviewTest {
             compose.click("inspection-row:$inspectionId")
             compose.waitForTag("car-drawing")
 
-            // 5 findings by 5 taps: a tap on a part starts a new finding with that dot and area; label it and save.
+            // 5 findings by 5 taps: a tap on a part starts a new finding with that dot and area; label it and save. Each tap is
+            // on a point clear of the markers already there: a tap on a marker opens that marker's finding instead (as it should).
             for (i in 1..5) {
-                val region = usable.keys.toList().pick(random)
-                val p = PointSampler.inside(random, drawing, region)
                 compose.waitForTag("finding-add")
+                var region: String
+                var p: com.streamlinemyjob.inspect.testdata.DrawingPoint
+                var tries = 0
+                do {
+                    check(++tries <= 200) { "no point of a linked part clear of the markers in 200 tries" }
+                    region = usable.keys.toList().pick(random)
+                    p = PointSampler.inside(random, drawing, region)
+                } while (DrawingTestSupport.underMarker(compose, p.x, p.y))
                 tapUnits(compose, p.x, p.y)
                 compose.waitForTag("save")
                 waitSelected(compose, "value:${usable.getValue(region)}")
