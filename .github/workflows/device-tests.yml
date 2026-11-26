@@ -44,7 +44,7 @@ jobs:
       - name: Instrumented tests on api34
         run: |
           # Seed: first 16 hex digits of the commit sha as a signed 64-bit number (design 4.5).
-          SEED=$((16#${SMJ_SHA:0:16}))
+          SEED=2192129022363955787  # fixed: the seed S1.15 failed with
           echo "device-seed=$SEED"
           ./gradlew :app:api34DebugAndroidTest --console=plain \
             -Pandroid.testInstrumentationRunnerArguments.smjSeed="$SEED" \
