@@ -6,6 +6,9 @@ import java.io.File
 object DocsRules {
     const val SEED_PATH = "app/src/main/assets/seed/lists.json"
 
+    const val DRAWING_PATH = "app/src/main/assets/drawing/car-top.json"
+    const val LINKS_PATH = "app/src/main/assets/drawing/links.json"
+
     fun check(root: File): List<String> {
         val readme = File(root, "README.md")
         if (!readme.isFile) return listOf("DOCS_MISSING")
@@ -17,6 +20,7 @@ object DocsRules {
             if (!named) problems += "DOCS_SCRIPT_MISSING $name"
         }
         if (!text.contains(SEED_PATH)) problems += "DOCS_SEED_PATH"
+        if (!text.contains(DRAWING_PATH) || !text.contains(LINKS_PATH)) problems += "DOCS_DRAWING_PATH"
         return problems
     }
 

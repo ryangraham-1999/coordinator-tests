@@ -142,6 +142,22 @@ object DrawingTestSupport {
         return p.x >= inset && p.y >= inset && p.x <= size.width - inset && p.y <= size.height - inset
     }
 
+    /**
+     * Whether the drawing point ([ux], [uy]) is under (or within [margin] pixels of) one of the Inspection screen's numbered
+     * markers (`finding-dot:<n>`), which sit over the drawing: a tap there goes to the marker, not to the drawing.
+     */
+    fun underMarker(compose: ComposeTestRule, ux: Double, uy: Double, margin: Float = 4f): Boolean {
+        val canvas = compose.waitForTag("car-drawing").fetchSemanticsNode().boundsInRoot
+        val at = pixelOf(compose, ux, uy).let { Offset(it.x + canvas.left, it.y + canvas.top) }
+        val marker = Regex("finding-dot:\\d+")
+        return compose.onAllNodes(
+            SemanticsMatcher("tag matches $marker") { it.config.getOrNull(SemanticsProperties.TestTag)?.let { tag -> marker.matches(tag) } == true },
+        ).fetchSemanticsNodes().any { node ->
+            val b = node.boundsInRoot
+            at.x >= b.left - margin && at.x <= b.right + margin && at.y >= b.top - margin && at.y <= b.bottom + margin
+        }
+    }
+
     /** Taps the drawing point ([ux], [uy]) (drawing units), through the zoom and offset the canvas shows. */
     fun tapUnits(compose: ComposeTestRule, ux: Double, uy: Double) {
         val p = pixelOf(compose, ux, uy)
