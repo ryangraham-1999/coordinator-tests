@@ -1,0 +1,53 @@
+# Public test copy (coordinator-tests): runs on every push to any branch, free because the repo is public.
+# Filled by scripts/publish-tests in the private repo; edit the copy in ci/public/workflows there, not here.
+# Test build for the owner's phone: a debug APK of the app, rebuilt on every push to stage-1 and on every
+# pull request into it. NOT part of the staged plan's release step (S1.20 makes the signed release).
+# The APK is the ".debug" app (Coordinator (debug)), so it installs beside the real one and never touches it.
+name: test-build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANDROID_HOME: ${{ github.workspace }}/../android-sdk
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/../android-sdk
+      SMJ_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SMJ_SHA }}
+      # actions/setup-java v6.3.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Android SDK
+        run: bash ci/install-android-sdk.sh
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --console=plain
+      - name: Name the APK after the commit
+        run: |
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+          mkdir -p dist
+          cp "$APK" "dist/coordinator-debug-${SMJ_SHA:0:7}.apk"
+          ls -l dist
+      # actions/upload-artifact v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: coordinator-debug-apk
+          path: dist/*.apk
+          retention-days: 30
+          if-no-files-found: error

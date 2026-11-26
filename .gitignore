@@ -1,0 +1,11 @@
+build/
+.gradle/
+local.properties
+*.jks
+*.keystore
+keystore.properties
+.idea/
+*.log
+
+# Exception: the throwaway signing key for the test build (debug app only; never the release key).
+!app/debug-key/test-debug.keystore

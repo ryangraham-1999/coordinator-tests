@@ -1,0 +1,9 @@
+#!/bin/sh
+# Thin launcher (designs/stage-1-foundation.md 4.5): build tools quietly, then run `tools make-key`.
+cd "$(dirname "$0")/.." || exit 2
+mkdir -p build/check
+if ! ./gradlew -q :tools:installDist > build/check/tools-build.log 2>&1; then
+  echo "CHECK FAIL tools did not build; see build/check/tools-build.log"
+  exit 2
+fi
+exec tools/build/install/tools/bin/tools make-key "$@"

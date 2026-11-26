@@ -1,0 +1,7 @@
+androidx
+org.jetbrains.kotlin
+org.jetbrains.kotlinx
+org.jetbrains
+com.google.guava
+org.jspecify
+com.google.errorprone
