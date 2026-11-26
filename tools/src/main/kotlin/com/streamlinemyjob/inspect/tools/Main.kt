@@ -23,6 +23,12 @@ fun main(args: Array<String>) {
             println("CHECK FAIL tools crashed: ${e.javaClass.name}: ${e.message}")
             2
         }
+        "publish" -> try {
+            Publish(root, File(System.getProperty("user.home")), Place.fromEnvironment(), Proc.SYSTEM, System.out).run()
+        } catch (e: Throwable) {
+            println("PUBLISH_GH tools crashed: ${e.javaClass.name}: ${e.message}")
+            1
+        }
         "device-report" -> DeviceReport.run(root, rest, System.out)
         "selftest" -> try {
             // UTF-8, so the "…" of 4.6's lines is not printed as "?" where the JVM's console charset is ASCII.
@@ -45,7 +51,7 @@ fun main(args: Array<String>) {
             1
         }
         else -> {
-            System.out.println("usage: tools make-key | tools check [options] | tools device-report [<report folder>...] | tools selftest | tools trimmer-testset | tools check-trimmer")
+            System.out.println("usage: tools make-key | tools publish | tools check [options] | tools device-report [<report folder>...] | tools selftest | tools trimmer-testset | tools check-trimmer")
             2
         }
     }
