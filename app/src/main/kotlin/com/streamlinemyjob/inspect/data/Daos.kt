@@ -70,3 +70,61 @@ interface RegionLinkDao {
     @Query("SELECT id FROM finding WHERE (dot_x IS NULL) + (dot_y IS NULL) + (dot_drawing IS NULL) IN (1, 2) ORDER BY id")
     fun halfDots(): List<String>
 }
+
+/** The photo table (designs/stage-2-camera.md 4.4, 4.5). Only the Repository, DataCheck and the test snapshot call it. */
+@Dao
+interface PhotoDao {
+    @Insert fun insert(photo: Photo)
+    @Query("SELECT * FROM photo WHERE id = :id") fun get(id: String): Photo?
+    @Query("SELECT * FROM photo ORDER BY id") fun all(): List<Photo>
+    @Query("SELECT * FROM photo WHERE finding_id = :findingId ORDER BY position, id") fun forFinding(findingId: String): List<Photo>
+    @Query("SELECT COUNT(*) FROM photo WHERE finding_id = :findingId") fun countForFinding(findingId: String): Int
+    @Query("SELECT COUNT(*) FROM photo WHERE rel_path = :relPath") fun countWithPath(relPath: String): Int
+    @Query("DELETE FROM photo WHERE id = :id") fun delete(id: String): Int
+
+    /** Moves [id] to [to] and shifts the ones in between (4.5): one of the two shifts, then [setPosition]. */
+    @Query("UPDATE photo SET position = position - 1 WHERE finding_id = :findingId AND position > :from AND position <= :to")
+    fun shiftDown(findingId: String, from: Int, to: Int)
+
+    @Query("UPDATE photo SET position = position + 1 WHERE finding_id = :findingId AND position >= :to AND position < :from")
+    fun shiftUp(findingId: String, from: Int, to: Int)
+
+    @Query("UPDATE photo SET position = :position WHERE id = :id") fun setPosition(id: String, position: Int)
+
+    /** Closes the gap a deleted photo left (4.5). */
+    @Query("UPDATE photo SET position = position - 1 WHERE finding_id = :findingId AND position > :deleted")
+    fun closeGap(findingId: String, deleted: Int)
+
+    @Query("SELECT rel_path FROM photo WHERE finding_id = :findingId ORDER BY rel_path")
+    fun pathsOfFinding(findingId: String): List<String>
+
+    @Query(
+        "SELECT rel_path FROM photo WHERE finding_id IN (SELECT id FROM finding WHERE inspection_id = :inspectionId) ORDER BY rel_path",
+    )
+    fun pathsOfInspection(inspectionId: String): List<String>
+
+    @Query(
+        "SELECT rel_path FROM photo WHERE finding_id IN (SELECT id FROM finding WHERE inspection_id IN " +
+            "(SELECT id FROM inspection WHERE vehicle_id = :vehicleId)) ORDER BY rel_path",
+    )
+    fun pathsOfVehicle(vehicleId: String): List<String>
+
+    @Query(
+        "SELECT COUNT(*) FROM photo WHERE finding_id IN (SELECT id FROM finding WHERE inspection_id IN " +
+            "(SELECT id FROM inspection WHERE vehicle_id = :vehicleId))",
+    )
+    fun countForVehicle(vehicleId: String): Int
+
+    @Query("SELECT COUNT(*) FROM photo WHERE finding_id IN (SELECT id FROM finding WHERE inspection_id = :inspectionId)")
+    fun countForInspection(inspectionId: String): Int
+
+    /** Photos whose `reduced` is neither 0 nor 1 (`IC_PHOTO_FIELDS`, 4.6); a Boolean column cannot show it. */
+    @Query("SELECT id FROM photo WHERE reduced NOT IN (0, 1) ORDER BY id") fun badReduced(): List<String>
+}
+
+@Dao
+interface AppSettingDao {
+    @Query("SELECT value FROM app_setting WHERE `key` = :key") fun get(key: String): String?
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE) fun set(setting: AppSetting)
+    @Query("SELECT * FROM app_setting ORDER BY `key`") fun all(): List<AppSetting>
+}

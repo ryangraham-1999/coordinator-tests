@@ -25,7 +25,8 @@ import java.util.UUID
  * exported schema file, filled by plain SQL from a generated snapshot, upgraded, validated against the new
  * version's file, opened with the loader, and read back. Version 1 to 2: every finding that had no action
  * reads "No action". Version 2 to 3: nothing changes except that every vehicle and list is a `car`, no
- * finding has a dot, and the region-link loader makes one row per region of the drawing.
+ * finding has a dot, and the region-link loader makes one row per region of the drawing. The current database is version 4 (stage 2),
+ * so the upgraded database is opened with `MIGRATION_3_4` as well; `PhotoMigrationTest` is the test of that step.
  */
 @RunWith(RobolectricTestRunner::class)
 class MigrationTest {
@@ -97,7 +98,7 @@ class MigrationTest {
             helper.createDatabase(name, from).use { fill(it, s, from); prepare(it) }
             helper.runMigrationsAndValidate(name, 3, true, *migrations.toTypedArray()).close()
             val db = androidx.room.Room.databaseBuilder(context, AppDatabase::class.java, name)
-                .addMigrations(*migrations.toTypedArray()).allowMainThreadQueries().build()
+                .addMigrations(*migrations.toTypedArray(), MIGRATION_3_4).allowMainThreadQueries().build()
             try {
                 assertEquals("no region link before the loader", 0, db.regionLinkDao().all().size)
                 RegionLinkLoader.run(db, drawing, ConfirmedDrawing.links)
@@ -191,7 +192,7 @@ class MigrationTest {
             helper.createDatabase(name, 2).use { fill(it, before, 2) }
             helper.runMigrationsAndValidate(name, 3, true, MIGRATION_2_3).close()
             val db = androidx.room.Room.databaseBuilder(context, AppDatabase::class.java, name)
-                .addMigrations(MIGRATION_2_3).allowMainThreadQueries().build()
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4).allowMainThreadQueries().build()
             try {
                 val first = RegionLinkLoader.run(db, drawing, ConfirmedDrawing.links)
                 assertEquals(drawing.regions.size, first.linked + first.notLinked)

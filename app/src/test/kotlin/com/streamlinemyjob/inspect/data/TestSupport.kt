@@ -7,6 +7,7 @@ import com.streamlinemyjob.inspect.core.LinkData
 import com.streamlinemyjob.inspect.core.Role
 import com.streamlinemyjob.inspect.core.Seed
 import com.streamlinemyjob.inspect.core.SeedData
+import com.streamlinemyjob.inspect.photo.PhotoFolder
 import com.streamlinemyjob.inspect.testdata.RegGenerator
 import com.streamlinemyjob.inspect.testdata.Snapshot
 import java.io.File
@@ -53,14 +54,17 @@ object ConfirmedDrawing {
 
 /**
  * A fresh database on its own file, seeded with [seedText], then the region-link loader with [linksText]
- * (the confirmed link file when not given; with another seed its links start not linked), and a repository over it.
+ * (the confirmed link file when not given; with another seed its links start not linked), and a repository over it. With a [folder]
+ * (stage 2, S2.4) the repository saves photos there and [snapshot] and [check] read it too.
  */
-class TestDb(seedText: String, val clock: TickingClock = TickingClock(), linksText: String? = null) : AutoCloseable {
+class TestDb(
+    seedText: String, val clock: TickingClock = TickingClock(), linksText: String? = null, val folder: PhotoFolder? = null,
+) : AutoCloseable {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
     val name = "test-${UUID.randomUUID()}.db"
     val db: AppDatabase = AppDatabase.build(context, name, allowMainThread = true)
     val drawing: Drawing = ConfirmedDrawing.drawing
-    val repo = Repository(db, clock, drawing)
+    val repo = Repository(db, clock, drawing, folder)
 
     init {
         SeedLoader.loadIfEmpty(db, seedText)
@@ -82,9 +86,9 @@ class TestDb(seedText: String, val clock: TickingClock = TickingClock(), linksTe
         return lists.flatMap { l -> values[l.id].orEmpty().sortedBy { it.position } }
     }
 
-    fun snapshot(): Snapshot = Snapshot.read(db)
+    fun snapshot(): Snapshot = Snapshot.read(db, folder)
 
-    fun check(): List<Violation> = DataCheck.run(db, drawing)
+    fun check(): List<Violation> = DataCheck.run(db, drawing, folder)
 
     override fun close() {
         db.close()

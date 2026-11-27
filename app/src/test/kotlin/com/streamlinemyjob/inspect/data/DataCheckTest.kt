@@ -124,7 +124,10 @@ class DataCheckTest {
     }
 
     @Test
-    fun thereIsAPlantForEveryCode() = assertEquals(DataCheck.ALL.toSet(), plants.keys)
+    fun thereIsAPlantForEveryCode() = assertEquals(
+        // The photo codes compare rows with the photo folder; `PhotoDataTest` plants those (stage 2 design 4.6).
+        DataCheck.ALL.toSet() - DataCheck.PHOTO_CODES.toSet(), plants.keys,
+    )
 
     @Test fun roleCount() = plantedAlone(DataCheck.IC_ROLE_COUNT, plants.getValue(DataCheck.IC_ROLE_COUNT))
     @Test fun findingRole() = plantedAlone(DataCheck.IC_FINDING_ROLE, plants.getValue(DataCheck.IC_FINDING_ROLE))

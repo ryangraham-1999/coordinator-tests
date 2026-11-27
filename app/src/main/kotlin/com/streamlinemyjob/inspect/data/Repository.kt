@@ -8,11 +8,14 @@ import com.streamlinemyjob.inspect.core.FindingText
 import com.streamlinemyjob.inspect.core.FindingView
 import com.streamlinemyjob.inspect.core.Hit
 import com.streamlinemyjob.inspect.core.Mileage
+import com.streamlinemyjob.inspect.core.Photos
 import com.streamlinemyjob.inspect.core.Reg
 import com.streamlinemyjob.inspect.core.Role
 import com.streamlinemyjob.inspect.core.Text
+import com.streamlinemyjob.inspect.photo.PhotoFolder
 import java.time.Clock
 import java.time.LocalDate
+import java.time.LocalTime
 import java.util.UUID
 
 /**
@@ -24,18 +27,55 @@ import java.util.UUID
  * [drawing] is the bundled drawing (4.20): taps, dots and region links (4.24) need it; a repository made
  * without one refuses to touch them (throws) because every dot is resolved against a drawing.
  *
+ * [folder] is the photo folder (designs/stage-2-camera.md 4.5, 4.12): photo calls need it, and the deletes of a finding, an
+ * inspection and a vehicle remove the files of the photos that go with them. A repository made without one refuses
+ * `addPhoto` with `PHOTO_FOLDER_NOT_SET` and has no file to remove.
+ *
  * Calls block: the UI calls them off the main thread.
  */
-class Repository(private val db: AppDatabase, private val clock: Clock, private val drawing: Drawing? = null) {
+class Repository(
+    private val db: AppDatabase,
+    private val clock: Clock,
+    private val drawing: Drawing? = null,
+    private val folder: PhotoFolder? = null,
+) {
     private val vehicles = db.vehicleDao()
     private val inspections = db.inspectionDao()
     private val tags = db.tagDao()
     private val findings = db.findingDao()
     private val links = db.regionLinkDao()
+    private val photos = db.photoDao()
+    private val settings = db.appSettingDao()
 
     private fun newId(): String = UUID.randomUUID().toString()
 
     private fun <T> write(block: () -> Result<T>): Result<T> = db.runInTransaction<Result<T>> { block() }
+
+    /**
+     * As [write] for a delete that takes photos with it (4.5): [paths] reads, in the same transaction, the `rel_path`s of the photos
+     * that will go; after the commit, and only if it was made, their files are deleted. A file that is already gone is not an error,
+     * and a file that cannot be deleted stays behind as an unknown file (harmless; the storage report counts it).
+     */
+    private fun <T> writeRemovingFiles(paths: () -> List<String>, block: () -> Result<T>): Result<T> {
+        var gone: List<String> = emptyList()
+        val result = db.runInTransaction<Result<T>> {
+            gone = paths()
+            block()
+        }
+        if (result is Ok) removeFiles(gone)
+        return result
+    }
+
+    private fun removeFiles(relPaths: List<String>) {
+        val f = folder ?: return
+        for (path in relPaths) {
+            try {
+                f.delete(path)
+            } catch (e: java.io.IOException) {
+                // The row is already gone; a file left behind is an unknown file, never a row without a file (4.5).
+            }
+        }
+    }
 
     // ---- Vehicles ----
 
@@ -65,13 +105,17 @@ class Repository(private val db: AppDatabase, private val clock: Clock, private 
     }
 
     /** Deletes the vehicle; its inspections and findings go with it (foreign key cascade). */
-    fun deleteVehicle(id: String): Result<String> = write {
+    fun deleteVehicle(id: String): Result<String> = writeRemovingFiles({ photos.pathsOfVehicle(id) }) {
         if (vehicles.delete(id) == 0) Refused(RepoCodes.NOT_FOUND, id) else Ok(id)
     }
 
     /** What [deleteVehicle] would remove, for the screen to show first. */
     fun countsForVehicle(id: String): VehicleCounts =
-        VehicleCounts(inspections.countForVehicle(id), findings.countForVehicle(id))
+        VehicleCounts(inspections.countForVehicle(id), findings.countForVehicle(id), photos.countForVehicle(id))
+
+    /** What [deleteInspection] would remove (4.5): the findings and the photos on them. */
+    fun countsForInspection(id: String): InspectionCounts =
+        InspectionCounts(findings.forInspection(id).size, photos.countForInspection(id))
 
     fun vehicle(id: String): Vehicle? = vehicles.get(id)
 
@@ -148,7 +192,7 @@ class Repository(private val db: AppDatabase, private val clock: Clock, private 
     }
 
     /** Deletes the inspection; its findings go with it (foreign key cascade). */
-    fun deleteInspection(id: String): Result<String> = write {
+    fun deleteInspection(id: String): Result<String> = writeRemovingFiles({ photos.pathsOfInspection(id) }) {
         if (inspections.delete(id) == 0) Refused(RepoCodes.NOT_FOUND, id) else Ok(id)
     }
 
@@ -331,7 +375,7 @@ class Repository(private val db: AppDatabase, private val clock: Clock, private 
 
     private fun ActionChoice.valueId(): String? = (this as? ActionChoice.Value)?.valueId
 
-    fun deleteFinding(id: String): Result<String> = write {
+    fun deleteFinding(id: String): Result<String> = writeRemovingFiles({ photos.pathsOfFinding(id) }) {
         if (findings.delete(id) == 0) Refused(RepoCodes.NOT_FOUND, id) else Ok(id)
     }
 
@@ -340,6 +384,132 @@ class Repository(private val db: AppDatabase, private val clock: Clock, private 
     /** An inspection's findings, by `created_at`. */
     fun findingsForInspection(inspectionId: String): List<Finding> =
         findings.forInspection(inspectionId).sortedWith(compareBy<Finding> { it.createdAt }.thenBy { it.id })
+
+    // ---- Photos (stage 2 design 4.5) ----
+
+    /**
+     * 4.5: saves one photo on a finding. Refused, with the database and the folder as they were: `NOT_FOUND` (no such finding),
+     * `PHOTO_LIMIT` (it has 20), `PHOTO_FOLDER_NOT_SET` (the folder is not ready), `PHOTO_BAD` (not a JPEG, empty, over
+     * [Photos.MAX_BYTES], a long side outside 1..[Photos.LONG_SIDE], a short side under 1, or a quality outside
+     * [Photos.MIN_QUALITY]..[Photos.START_QUALITY]), `PHOTO_WRITE` (the file could not be written, or the row could not be saved; no
+     * file is left). The file is written and renamed before its row exists, so a crash between the two leaves an unknown file, never
+     * a row without a file. `rel_path` is made by 4.12's rule from the vehicle's reg key, the inspection's date, the area's name and
+     * the clock's time, and is made unique against the folder and the `photo` table.
+     */
+    fun addPhoto(findingId: String, jpeg: ByteArray, width: Int, height: Int, quality: Int, reduced: Boolean): Result<String> {
+        val planned = db.runInTransaction<Any> {
+            val finding = findings.get(findingId) ?: return@runInTransaction Refused(RepoCodes.NOT_FOUND, findingId)
+            if (photos.countForFinding(findingId) >= Photos.MAX_PER_FINDING) {
+                return@runInTransaction Refused(RepoCodes.PHOTO_LIMIT, findingId)
+            }
+            val f = folder
+            if (f == null || !f.isReady()) return@runInTransaction Refused(RepoCodes.PHOTO_FOLDER_NOT_SET)
+            val bad = photoBad(jpeg, width, height, quality)
+            if (bad != null) return@runInTransaction Refused(RepoCodes.PHOTO_BAD, bad)
+            val inspection = inspections.get(finding.inspectionId)!!
+            val vehicle = vehicles.get(inspection.vehicleId)!!
+            val area = tags.getValue(finding.areaValueId)!!
+            val name = Photos.fileName(
+                vehicle.regKey, Dates.fromStored(inspection.date), area.name, LocalTime.ofInstant(clock.instant(), clock.zone),
+            ) { candidate ->
+                val path = Photos.relPath(vehicle.regKey, candidate)
+                photos.countWithPath(path) > 0 || f.exists(path)
+            }
+            Photos.relPath(vehicle.regKey, name)
+        }
+        if (planned is Refused) return planned
+        val relPath = planned as String
+        val f = folder!!
+        try {
+            f.write(relPath, jpeg)
+        } catch (e: Exception) {
+            removePart(f, relPath)
+            return Refused(RepoCodes.PHOTO_WRITE, e.javaClass.simpleName)
+        }
+        val id = newId()
+        return try {
+            db.runInTransaction<Result<String>> {
+                if (findings.get(findingId) == null) {
+                    throw IllegalStateException("finding gone")
+                }
+                photos.insert(
+                    Photo(id, findingId, photos.countForFinding(findingId), relPath, width, height, jpeg.size, quality, reduced, clock.millis()),
+                )
+                Ok(id)
+            }
+        } catch (e: Exception) {
+            try {
+                f.delete(relPath)
+            } catch (ignored: java.io.IOException) {
+                // The file stays as an unknown file; the refusal below still says the photo was not saved.
+            }
+            Refused(RepoCodes.PHOTO_WRITE, e.javaClass.simpleName)
+        }
+    }
+
+    private fun removePart(f: PhotoFolder, relPath: String) {
+        try {
+            f.delete(relPath + PhotoFolder.PART)
+        } catch (e: java.io.IOException) {
+            // Nothing more can be done here; the sweep removes it on the next start (4.6).
+        }
+    }
+
+    /** Why [jpeg] and its numbers are not a photo `addPhoto` accepts (4.5), or null. */
+    private fun photoBad(jpeg: ByteArray, width: Int, height: Int, quality: Int): String? = when {
+        jpeg.isEmpty() -> "empty"
+        jpeg.size < 2 || jpeg[0] != 0xFF.toByte() || jpeg[1] != 0xD8.toByte() -> "not a jpeg"
+        jpeg.size > Photos.MAX_BYTES -> "over ${Photos.MAX_BYTES} bytes"
+        minOf(width, height) < 1 -> "short side under 1"
+        maxOf(width, height) !in 1..Photos.LONG_SIDE -> "long side outside 1..${Photos.LONG_SIDE}"
+        quality !in Photos.MIN_QUALITY..Photos.START_QUALITY -> "quality outside ${Photos.MIN_QUALITY}..${Photos.START_QUALITY}"
+        else -> null
+    }
+
+    /**
+     * 4.5: moves the photo to [toPosition] (0..n-1) and shifts the others to keep 0..n-1. Files are not touched or renamed.
+     * Refused `NOT_FOUND` (no such photo), `PHOTO_POSITION` (out of range).
+     */
+    fun movePhoto(photoId: String, toPosition: Int): Result<String> = write {
+        val photo = photos.get(photoId) ?: return@write Refused(RepoCodes.NOT_FOUND, photoId)
+        val count = photos.countForFinding(photo.findingId)
+        if (toPosition !in 0 until count) return@write Refused(RepoCodes.PHOTO_POSITION, toPosition.toString())
+        if (toPosition > photo.position) photos.shiftDown(photo.findingId, photo.position, toPosition)
+        if (toPosition < photo.position) photos.shiftUp(photo.findingId, photo.position, toPosition)
+        photos.setPosition(photoId, toPosition)
+        Ok(photoId)
+    }
+
+    /**
+     * 4.5: deletes the photo's row and renumbers the rest in one transaction; after it commits, the file is deleted. A crash in
+     * between leaves an unknown file. Refused `NOT_FOUND`.
+     */
+    fun deletePhoto(photoId: String): Result<String> {
+        var path: String? = null
+        val result = write {
+            val photo = photos.get(photoId) ?: return@write Refused(RepoCodes.NOT_FOUND, photoId)
+            photos.delete(photoId)
+            photos.closeGap(photo.findingId, photo.position)
+            path = photo.relPath
+            Ok(photoId)
+        }
+        if (result is Ok) removeFiles(listOfNotNull(path))
+        return result
+    }
+
+    /** A finding's photos by `position` (4.5). */
+    fun photosForFinding(findingId: String): List<Photo> = photos.forFinding(findingId)
+
+    fun photoCount(findingId: String): Int = photos.countForFinding(findingId)
+
+    /** The picked photo folder's tree URI string, or null if none is set (4.5, 4.12). */
+    fun photoFolder(): String? = settings.get(AppSetting.PHOTO_FOLDER)
+
+    /** Saves the picked photo folder's tree URI string (4.5, 4.12). */
+    fun setPhotoFolder(treeUri: String): Result<String> = write {
+        settings.set(AppSetting(AppSetting.PHOTO_FOLDER, treeUri))
+        Ok(treeUri)
+    }
 
     // ---- Offered values (4.12) ----
 

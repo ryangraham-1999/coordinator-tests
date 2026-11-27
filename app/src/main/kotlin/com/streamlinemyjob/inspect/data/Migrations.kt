@@ -37,3 +37,22 @@ val MIGRATION_2_3: Migration = object : Migration(2, 3) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_region_link_value_id` ON `region_link` (`value_id`)")
     }
 }
+
+/**
+ * Version 3 to 4 (designs/stage-2-camera.md 4.4), hand-written so the SQL is reviewed. Adds the `photo` table with its two
+ * indexes (one unique, on `rel_path`) and the `app_setting` table, written as Room's exported `4.json` writes them. No other
+ * table changes and no data changes: after it both new tables are empty.
+ */
+val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `photo` (`id` TEXT NOT NULL, `finding_id` TEXT NOT NULL, `position` INTEGER NOT NULL, " +
+                "`rel_path` TEXT NOT NULL, `width` INTEGER NOT NULL, `height` INTEGER NOT NULL, `bytes` INTEGER NOT NULL, " +
+                "`quality` INTEGER NOT NULL, `reduced` INTEGER NOT NULL, `taken_at` INTEGER NOT NULL, PRIMARY KEY(`id`), " +
+                "FOREIGN KEY(`finding_id`) REFERENCES `finding`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_photo_finding_id` ON `photo` (`finding_id`)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_photo_rel_path` ON `photo` (`rel_path`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `app_setting` (`key` TEXT NOT NULL, `value` TEXT NOT NULL, PRIMARY KEY(`key`))")
+    }
+}

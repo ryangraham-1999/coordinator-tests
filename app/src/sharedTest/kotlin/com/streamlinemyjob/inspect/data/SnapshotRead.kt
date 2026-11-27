@@ -1,9 +1,13 @@
 package com.streamlinemyjob.inspect.data
 
+import com.streamlinemyjob.inspect.photo.PhotoFolder
 import com.streamlinemyjob.inspect.testdata.Snapshot
 
-/** Reads every table into a [Snapshot] (designs/stage-1-foundation.md 4.15). */
-fun Snapshot.Companion.read(db: AppDatabase): Snapshot = db.runInTransaction<Snapshot> {
+/**
+ * Reads every table into a [Snapshot] (designs/stage-1-foundation.md 4.15). With a [folder] (stage 2 design 4.10) the snapshot also
+ * holds the folder's files, path to length, as the folder lists them.
+ */
+fun Snapshot.Companion.read(db: AppDatabase, folder: PhotoFolder? = null): Snapshot = db.runInTransaction<Snapshot> {
     val lists = db.tagDao().allLists()
     val values = db.tagDao().allValues()
     val listById = lists.associateBy { it.id }
@@ -27,5 +31,10 @@ fun Snapshot.Companion.read(db: AppDatabase): Snapshot = db.runInTransaction<Sna
             )
         },
         regionLinks = db.regionLinkDao().all().map { Snapshot.RegionLinkRow(it.drawingId, it.regionId, it.valueId) },
+        photos = db.photoDao().all().map {
+            Snapshot.PhotoRow(it.id, it.findingId, it.position, it.relPath, it.width, it.height, it.bytes, it.quality, it.reduced, it.takenAt)
+        },
+        photoFiles = folder?.list()?.associate { it.relPath to it.length } ?: emptyMap(),
+        settings = db.appSettingDao().all().associate { it.key to it.value },
     )
 }

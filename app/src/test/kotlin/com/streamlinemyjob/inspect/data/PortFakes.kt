@@ -26,6 +26,10 @@ open class PassThroughPort(val inner: RepositoryPort) : RepositoryPort {
     override fun renameList(listId: String, rawName: String): PortResult = inner.renameList(listId, rawName)
     override fun addValue(listId: String, rawName: String): PortResult = inner.addValue(listId, rawName)
     override fun addAreaList(rawName: String): PortResult = inner.addAreaList(rawName)
+    override fun addPhoto(findingId: String, jpeg: ByteArray, width: Int, height: Int, quality: Int, reduced: Boolean): PortResult =
+        inner.addPhoto(findingId, jpeg, width, height, quality, reduced)
+    override fun movePhoto(photoId: String, toPosition: Int): PortResult = inner.movePhoto(photoId, toPosition)
+    override fun zone(): java.time.ZoneId = inner.zone()
     override fun snapshot(): Snapshot = inner.snapshot()
     override fun setTime(epochMillis: Long) = inner.setTime(epochMillis)
     override fun today(): LocalDate = inner.today()

@@ -26,8 +26,11 @@ sealed interface Warning
 /** The vehicle's previous inspection (4.9) had a higher mileage than the one saved. */
 data class PreviousMileage(val mileage: Int, val date: LocalDate) : Warning
 
-/** How many inspections and findings a vehicle delete removes (4.12). */
-data class VehicleCounts(val inspections: Int, val findings: Int)
+/** How many inspections, findings and (from stage 2) photos a vehicle delete removes (4.12, stage 2 design 4.5). */
+data class VehicleCounts(val inspections: Int, val findings: Int, val photos: Int = 0)
+
+/** How many findings and photos an inspection delete removes (stage 2 design 4.5). */
+data class InspectionCounts(val findings: Int, val photos: Int)
 
 /** Which way `moveValue` and `moveList` move one step (4.13). */
 enum class Direction { UP, DOWN }
@@ -102,7 +105,22 @@ object RepoCodes {
     /** 4.24: a dot that does not resolve to a region linked to the finding's own area value. */
     const val DOT_AREA_MISMATCH = "DOT_AREA_MISMATCH"
 
-    /** The vehicle, inspection, finding, list or value named by id does not exist. */
+    /** Stage 2 design 4.5: the finding has 20 photos already. */
+    const val PHOTO_LIMIT = "PHOTO_LIMIT"
+
+    /** 4.5: the photo folder is not set or not ready; the folder screen opens instead of a text (4.12). */
+    const val PHOTO_FOLDER_NOT_SET = "PHOTO_FOLDER_NOT_SET"
+
+    /** 4.5: not a JPEG, empty, over the cap, a size or a quality outside the rules; the detail says which. */
+    const val PHOTO_BAD = "PHOTO_BAD"
+
+    /** 4.5: the file or the row could not be written; the detail is the exception's class. */
+    const val PHOTO_WRITE = "PHOTO_WRITE"
+
+    /** 4.5: `movePhoto` to a position outside 0..n-1. */
+    const val PHOTO_POSITION = "PHOTO_POSITION"
+
+    /** The vehicle, inspection, finding, photo, list or value named by id does not exist. */
     const val NOT_FOUND = "NOT_FOUND"
 }
 

@@ -5,3 +5,5 @@ org.jetbrains
 com.google.guava
 org.jspecify
 com.google.errorprone
+# Stage 2 (S2.3; owner chose this 2026-11-27): annotations-only jar that CameraX 1.5.3 needs (auto-value-annotations).
+com.google.auto.value

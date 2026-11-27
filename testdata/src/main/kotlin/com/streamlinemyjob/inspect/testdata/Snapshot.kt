@@ -17,6 +17,12 @@ data class Snapshot(
     val findings: List<FindingRow>,
     /** Every `region_link` row (4.26, from S1.27). */
     val regionLinks: List<RegionLinkRow> = emptyList(),
+    /** Every `photo` row (stage 2 design 4.10, from S2.4). */
+    val photos: List<PhotoRow> = emptyList(),
+    /** The photo folder's files, path to length, read from the folder (empty when no folder is read). */
+    val photoFiles: Map<String, Long> = emptyMap(),
+    /** Every `app_setting` row, key to value. */
+    val settings: Map<String, String> = emptyMap(),
 ) {
     data class VehicleRow(val id: String, val regDisplay: String, val regKey: String, val createdAt: Long, val vehicleType: String = "car")
 
@@ -51,6 +57,20 @@ data class Snapshot(
         val dotDrawing: String? = null,
     )
 
+    /** A `photo` row (stage 2 design 4.4, 4.10): [position] is the one after any moves. */
+    data class PhotoRow(
+        val id: String,
+        val findingId: String,
+        val position: Int,
+        val relPath: String,
+        val width: Int,
+        val height: Int,
+        val bytes: Int,
+        val quality: Int,
+        val reduced: Boolean,
+        val takenAt: Long,
+    )
+
     /** A `region_link` row (4.23, 4.27): [valueId] null means not linked. */
     data class RegionLinkRow(val drawingId: String, val regionId: String, val valueId: String?)
 
@@ -79,6 +99,24 @@ data class Snapshot(
             table("tag_value", expected.values, actual.values) { it.id }
             table("finding", expected.findings, actual.findings) { it.id }
             table("region_link", expected.regionLinks, actual.regionLinks) { "${it.drawingId}/${it.regionId}" }
+            table("photo", expected.photos, actual.photos) { it.id }
+            for (key in (expected.photoFiles.keys + actual.photoFiles.keys).sorted()) {
+                if (out.size >= max) break
+                val x = expected.photoFiles[key]
+                val y = actual.photoFiles[key]
+                when {
+                    x == y -> Unit
+                    x == null -> out += "photo file $key: not expected, found $y bytes"
+                    y == null -> out += "photo file $key: expected $x bytes, missing"
+                    else -> out += "photo file $key: expected $x bytes, found $y"
+                }
+            }
+            for (key in (expected.settings.keys + actual.settings.keys).sorted()) {
+                if (out.size >= max) break
+                if (expected.settings[key] != actual.settings[key]) {
+                    out += "app_setting $key: expected ${expected.settings[key]}, found ${actual.settings[key]}"
+                }
+            }
             return out.take(max)
         }
 

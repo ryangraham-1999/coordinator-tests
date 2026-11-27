@@ -178,6 +178,7 @@ class RepositoryPortTest {
     fun expectedCodesEqualRepoCodes() {
         assertEquals(RepoCodes.MILEAGE_LOWER_UNCONFIRMED, ExpectedCodes.MILEAGE_LOWER_UNCONFIRMED)
         assertEquals(RepoCodes.SAME_AREA_UNCONFIRMED, ExpectedCodes.SAME_AREA_UNCONFIRMED)
+        assertEquals(RepoCodes.PHOTO_LIMIT, ExpectedCodes.PHOTO_LIMIT)
     }
 
     /** The adapter's clock gives exactly the time last set, on every row, and does not tick. */

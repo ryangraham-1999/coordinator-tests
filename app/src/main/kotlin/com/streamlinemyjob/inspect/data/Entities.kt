@@ -118,3 +118,45 @@ data class RegionLink(
     @ColumnInfo(name = "region_id") val regionId: String,
     @ColumnInfo(name = "value_id") val valueId: String?,
 )
+
+/**
+ * One photo saved on one finding (designs/stage-2-camera.md 4.4, version 4): one row here plus one file in the
+ * photo folder. [relPath] is the path inside the folder (`<reg key>/<file name>`, 4.12), stored when the photo is
+ * saved and never worked out again, because the reg, date and area it is made from can change later (C16).
+ * [position] is 0..n-1 within the finding; 0 is shown first. [quality] is 60..85; [reduced] is 4.3 step 5.
+ */
+@Entity(
+    tableName = "photo",
+    foreignKeys = [
+        ForeignKey(entity = Finding::class, parentColumns = ["id"], childColumns = ["finding_id"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("finding_id"), Index(value = ["rel_path"], unique = true)],
+)
+data class Photo(
+    @PrimaryKey val id: String,
+    @ColumnInfo(name = "finding_id") val findingId: String,
+    val position: Int,
+    @ColumnInfo(name = "rel_path") val relPath: String,
+    /** Pixels, as stored. */
+    val width: Int,
+    val height: Int,
+    /** The file's length. */
+    val bytes: Int,
+    val quality: Int,
+    /** 0 or 1 (4.3 step 5). */
+    val reduced: Boolean,
+    /** Epoch ms UTC, from the Repository's clock. */
+    @ColumnInfo(name = "taken_at") val takenAt: Long,
+)
+
+/** A small key/value setting (4.4, version 4). Stage 2 has one key, [PHOTO_FOLDER]. */
+@Entity(tableName = "app_setting")
+data class AppSetting(
+    @PrimaryKey val key: String,
+    val value: String,
+) {
+    companion object {
+        /** The picked photo folder's tree URI string (4.12): the only URI the database stores. */
+        const val PHOTO_FOLDER = "photo_folder"
+    }
+}

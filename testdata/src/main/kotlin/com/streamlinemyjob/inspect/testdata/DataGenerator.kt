@@ -4,6 +4,7 @@ import com.streamlinemyjob.inspect.core.ActionChoice
 import com.streamlinemyjob.inspect.core.Dates
 import com.streamlinemyjob.inspect.core.Drawing
 import com.streamlinemyjob.inspect.core.Mileage
+import com.streamlinemyjob.inspect.core.Photos
 import com.streamlinemyjob.inspect.core.Reg
 import com.streamlinemyjob.inspect.core.Role
 import com.streamlinemyjob.inspect.core.Rules
@@ -41,8 +42,9 @@ object DataGenerator {
      * finding whose area value is linked from at least one region and is offered gets, with probability 0.5, a
      * dot at a [PointSampler] point of one of those regions; without one, no finding has a dot.
      */
-    fun generate(random: Random, port: RepositoryPort, findings: Int, start: Instant, drawing: Drawing? = null): Snapshot =
-        Run(random, port, findings, start.toEpochMilli(), drawing).go()
+    fun generate(
+        random: Random, port: RepositoryPort, findings: Int, start: Instant, drawing: Drawing? = null, photos: Boolean = false,
+    ): Snapshot = Run(random, port, findings, start.toEpochMilli(), drawing, photos).go()
 
     private class PlannedInspection(
         val vehicle: Int,
@@ -65,7 +67,9 @@ object DataGenerator {
         val rawNote: String,
     )
 
-    private class Run(val random: Random, val port: RepositoryPort, val n: Int, val start: Long, val drawing: Drawing?) {
+    private class Run(
+        val random: Random, val port: RepositoryPort, val n: Int, val start: Long, val drawing: Drawing?, val withPhotos: Boolean,
+    ) {
         private var writes = 0L
 
         private fun <T> write(call: () -> T): T {
@@ -168,11 +172,81 @@ object DataGenerator {
                 )
             }
 
+            val newPhotos = ArrayList<Snapshot.PhotoRow>()
+            val newFiles = LinkedHashMap<String, Long>()
+            if (withPhotos) addPhotos(before, newVehicles, newInspections, newFindings, newPhotos, newFiles)
+
             return before.copy(
                 vehicles = (before.vehicles + newVehicles).sortedBy { it.id },
                 inspections = (before.inspections + newInspections).sortedBy { it.id },
                 findings = (before.findings + newFindings).sortedBy { it.id },
+                photos = (before.photos + newPhotos).sortedBy { it.id },
+                photoFiles = before.photoFiles + newFiles,
             )
+        }
+
+        /**
+         * Photos (stage 2 design 4.10): after the findings, each finding gets 0 to 3, one finding exactly 20 followed by a 21st that
+         * must be refused with `PHOTO_LIMIT`; then about one finding in ten with 2 or more photos gets one `movePhoto` to a random
+         * position. File names are worked out here with `core.Photos.fileName`, against the files the folder already held and the
+         * ones made so far; the expected rows and files are built from that, never read back.
+         */
+        private fun addPhotos(
+            before: Snapshot, vehicles: List<Snapshot.VehicleRow>, inspections: List<Snapshot.InspectionRow>,
+            findings: List<Snapshot.FindingRow>, outRows: MutableList<Snapshot.PhotoRow>, outFiles: MutableMap<String, Long>,
+        ) {
+            val taken = HashSet<String>(before.photoFiles.keys)
+            before.photos.mapTo(taken) { it.relPath }
+            val vehicleOf = vehicles.associateBy { it.id }
+            val inspectionOf = inspections.associateBy { it.id }
+            val zone = port.zone()
+            val full = if (findings.isEmpty()) -1 else random.nextInt(findings.size)
+            val perFinding = HashMap<String, MutableList<Snapshot.PhotoRow>>()
+
+            for ((k, f) in findings.withIndex()) {
+                val inspection = inspectionOf.getValue(f.inspectionId)
+                val vehicle = vehicleOf.getValue(inspection.vehicleId)
+                val count = if (k == full) Photos.MAX_PER_FINDING else random.nextInt(4)
+                val rows = perFinding.getOrPut(f.id) { ArrayList() }
+                val what = "finding ${k + 1} (${vehicle.regDisplay}, ${inspection.date}, area ${f.areaName})"
+                repeat(count) { i ->
+                    val jpeg = FakeJpeg.make(random)
+                    val width = between(1, Photos.LONG_SIDE)
+                    val height = between(1, Photos.LONG_SIDE)
+                    val quality = between(Photos.MIN_QUALITY, Photos.START_QUALITY)
+                    val reduced = random.nextBoolean()
+                    val at = start + writes
+                    val id = expectAdded("photo ${i + 1} of $what", write { port.addPhoto(f.id, jpeg, width, height, quality, reduced) })
+                    val time = java.time.Instant.ofEpochMilli(at).atZone(zone).toLocalTime()
+                    val name = Photos.fileName(vehicle.regKey, java.time.LocalDate.parse(inspection.date), f.areaName ?: "", time) {
+                        Photos.relPath(vehicle.regKey, it) in taken
+                    }
+                    val path = Photos.relPath(vehicle.regKey, name)
+                    taken += path
+                    outFiles[path] = jpeg.size.toLong()
+                    rows += Snapshot.PhotoRow(id, f.id, rows.size, path, width, height, jpeg.size, quality, reduced, at)
+                }
+                if (k == full) {
+                    expectRefused(
+                        "21st photo of $what", ExpectedCodes.PHOTO_LIMIT,
+                        write { port.addPhoto(f.id, FakeJpeg.make(random), 64, 48, Photos.START_QUALITY, false) },
+                    )
+                }
+            }
+            for ((k, f) in findings.withIndex()) {
+                val rows = perFinding.getValue(f.id)
+                if (rows.size < 2 || random.nextInt(10) != 0) continue
+                val moving = rows[random.nextInt(rows.size)]
+                val to = random.nextInt(rows.size)
+                expectAdded(
+                    "move photo ${moving.id} of finding ${k + 1} to $to",
+                    write { port.movePhoto(moving.id, to) },
+                )
+                rows.remove(moving)
+                rows.add(to, moving)
+                for (i in rows.indices) rows[i] = rows[i].copy(position = i)
+            }
+            for (rows in perFinding.values) outRows += rows
         }
 
         /** About half of the findings on a linked, offered area get a dot on one of its regions (4.26). */

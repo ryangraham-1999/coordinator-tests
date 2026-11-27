@@ -2,10 +2,12 @@ package com.streamlinemyjob.inspect.data
 
 import com.streamlinemyjob.inspect.core.Drawing
 import com.streamlinemyjob.inspect.core.Hit
+import com.streamlinemyjob.inspect.core.Photos
 import com.streamlinemyjob.inspect.core.Reg
 import com.streamlinemyjob.inspect.core.Role
 import com.streamlinemyjob.inspect.core.Rules
 import com.streamlinemyjob.inspect.core.Text
+import com.streamlinemyjob.inspect.photo.PhotoFolder
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
@@ -35,27 +37,50 @@ object DataCheck {
     const val IC_DOT = "IC_DOT"
     const val IC_REGION_LINK = "IC_REGION_LINK"
 
+    // Stage 2 (designs/stage-2-camera.md 4.6): photos and the photo folder.
+    const val IC_PHOTO_FILE_MISSING = "IC_PHOTO_FILE_MISSING"
+    const val IC_PHOTO_ORPHAN_FILE = "IC_PHOTO_ORPHAN_FILE"
+    const val IC_PHOTO_BYTES = "IC_PHOTO_BYTES"
+    const val IC_PHOTO_POSITIONS = "IC_PHOTO_POSITIONS"
+    const val IC_PHOTO_COUNT = "IC_PHOTO_COUNT"
+    const val IC_PHOTO_FIELDS = "IC_PHOTO_FIELDS"
+
     /** Every code, in 4.14's table order. */
     val ALL = listOf(
         IC_ROLE_COUNT, IC_FINDING_ROLE, IC_ORPHAN, IC_NAME_KEY, IC_NAME_DUP,
         IC_POSITIONS, IC_REG, IC_INSPECTION, IC_NOTE, IC_AT_LEAST_ONE, IC_ACTION_STATE, IC_DOT, IC_REGION_LINK,
+        IC_PHOTO_FILE_MISSING, IC_PHOTO_ORPHAN_FILE, IC_PHOTO_BYTES, IC_PHOTO_POSITIONS, IC_PHOTO_COUNT, IC_PHOTO_FIELDS,
+    )
+
+    /** The photo codes (stage 2 design 4.6): the ones that need the photo folder, planted in `PhotoDataTest` rather than `DataCheckTest`. */
+    val PHOTO_CODES = listOf(
+        IC_PHOTO_FILE_MISSING, IC_PHOTO_ORPHAN_FILE, IC_PHOTO_BYTES, IC_PHOTO_POSITIONS, IC_PHOTO_COUNT, IC_PHOTO_FIELDS,
     )
 
     private val STORED_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("uuuu-MM-dd").withResolverStyle(ResolverStyle.STRICT)
 
-    /** [drawing] is the bundled drawing, which `IC_DOT` and `IC_REGION_LINK` check against (4.14). */
-    fun run(db: AppDatabase, drawing: Drawing): List<Violation> = db.runInTransaction<List<Violation>> {
-        check(
-            db.vehicleDao().all(), db.inspectionDao().all(), db.tagDao().allLists(),
-            db.tagDao().allValues(), db.findingDao().all(), db.findingDao().badActionState(),
-            drawing, db.regionLinkDao().all(), db.regionLinkDao().halfDots(),
-        )
+    /**
+     * [drawing] is the bundled drawing, which `IC_DOT` and `IC_REGION_LINK` check against (4.14). [folder] is the photo folder
+     * (stage 2 design 4.6): with one, its files are listed once and the photo codes that compare rows with files run too;
+     * without one only the codes that need no file run. It only reads: it never sweeps, repairs or deletes.
+     */
+    fun run(db: AppDatabase, drawing: Drawing, folder: PhotoFolder? = null): List<Violation> {
+        val files = folder?.list()?.associate { it.relPath to it.length }
+        return db.runInTransaction<List<Violation>> {
+            check(
+                db.vehicleDao().all(), db.inspectionDao().all(), db.tagDao().allLists(),
+                db.tagDao().allValues(), db.findingDao().all(), db.findingDao().badActionState(),
+                drawing, db.regionLinkDao().all(), db.regionLinkDao().halfDots(),
+                db.photoDao().all(), db.photoDao().badReduced(), files,
+            )
+        }
     }
 
     fun check(
         vehicles: List<Vehicle>, inspections: List<Inspection>, lists: List<TagList>,
         values: List<TagValue>, findings: List<Finding>, badActionState: List<String> = emptyList(),
         drawing: Drawing? = null, regionLinks: List<RegionLink> = emptyList(), halfDots: List<String> = emptyList(),
+        photos: List<Photo> = emptyList(), badReduced: List<String> = emptyList(), files: Map<String, Long>? = null,
     ): List<Violation> {
         val out = mutableListOf<Violation>()
         fun add(code: String, vararg ids: String) { out += Violation(code, ids.toList()) }
@@ -64,6 +89,7 @@ object DataCheck {
         val valueById = values.associateBy { it.id }
         val vehicleIds = vehicles.map { it.id }.toSet()
         val inspectionIds = inspections.map { it.id }.toSet()
+        val findingIds = findings.map { it.id }.toSet()
 
         // IC_ROLE_COUNT
         val byRole = lists.groupBy { it.role }
@@ -87,6 +113,7 @@ object DataCheck {
         inspections.filter { it.vehicleId !in vehicleIds }.forEach { add(IC_ORPHAN, it.id, it.vehicleId) }
         findings.filter { it.inspectionId !in inspectionIds }.forEach { add(IC_ORPHAN, it.id, it.inspectionId) }
         values.filter { it.listId !in listById }.forEach { add(IC_ORPHAN, it.id, it.listId) }
+        photos.filter { it.findingId !in findingIds }.forEach { add(IC_ORPHAN, it.id, it.findingId) }
         for (f in findings) {
             listOfNotNull(f.areaValueId, f.damageValueId, f.actionValueId)
                 .filter { it !in valueById }.forEach { add(IC_ORPHAN, f.id, it) }
@@ -165,6 +192,26 @@ object DataCheck {
                 val list = valueById[valueId]?.let { listById[it.listId] }
                 if (list == null || list.role != Role.AREA) add(IC_REGION_LINK, row.regionId, valueId)
             }
+        }
+
+        // Photos (stage 2 design 4.6).
+        val byFinding = photos.groupBy { it.findingId }
+        for ((findingId, rows) in byFinding) {
+            if (rows.map { it.position }.sorted() != rows.indices.toList()) add(IC_PHOTO_POSITIONS, findingId)
+            if (rows.size > Photos.MAX_PER_FINDING) add(IC_PHOTO_COUNT, findingId)
+        }
+        for (p in photos) {
+            val longSide = maxOf(p.width, p.height)
+            val fieldsBad = p.quality !in Photos.MIN_QUALITY..Photos.START_QUALITY || p.id in badReduced ||
+                p.width < 1 || p.height < 1 || longSide > Photos.LONG_SIDE || !Photos.isRelPathForm(p.relPath)
+            if (fieldsBad) add(IC_PHOTO_FIELDS, p.id)
+            val length = files?.get(p.relPath)
+            if (files != null && length == null) add(IC_PHOTO_FILE_MISSING, p.id, p.relPath)
+            if (p.bytes > Photos.MAX_BYTES || (length != null && length != p.bytes.toLong())) add(IC_PHOTO_BYTES, p.id)
+        }
+        if (files != null) {
+            val known = photos.map { it.relPath }.toSet()
+            files.keys.filter { it !in known }.sorted().forEach { add(IC_PHOTO_ORPHAN_FILE, it) }
         }
 
         return out

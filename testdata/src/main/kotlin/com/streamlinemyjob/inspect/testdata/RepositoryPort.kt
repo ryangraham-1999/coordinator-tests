@@ -42,7 +42,16 @@ interface RepositoryPort {
     /** Repository.addAreaList. A removed list brought back counts as `Added` with its id. */
     fun addAreaList(rawName: String): PortResult
 
-    /** Every table, read from the database now (Snapshot.read). */
+    /** Repository.addPhoto (stage 2 design 4.10, from S2.4). */
+    fun addPhoto(findingId: String, jpeg: ByteArray, width: Int, height: Int, quality: Int, reduced: Boolean): PortResult
+
+    /** Repository.movePhoto (stage 2 design 4.10, from S2.4). */
+    fun movePhoto(photoId: String, toPosition: Int): PortResult
+
+    /** The time zone of the Repository's clock, which names a photo by the time it was saved (4.12). */
+    fun zone(): java.time.ZoneId
+
+    /** Every table, read from the database now (Snapshot.read), with the photo folder's files if there is one. */
     fun snapshot(): Snapshot
 
     /** Sets the time the Repository's clock gives from now on, until set again. */
@@ -68,4 +77,5 @@ sealed interface PortResult {
 object ExpectedCodes {
     const val MILEAGE_LOWER_UNCONFIRMED = "MILEAGE_LOWER_UNCONFIRMED"
     const val SAME_AREA_UNCONFIRMED = "SAME_AREA_UNCONFIRMED"
+    const val PHOTO_LIMIT = "PHOTO_LIMIT"
 }
