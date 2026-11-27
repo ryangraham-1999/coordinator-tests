@@ -1,2 +1,4 @@
 # Stage 1: no permissions. AndroidX core may add the next one; it is not a network permission.
 ${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+# Stage 2 (designs/stage-2-camera.md 4.1): the in-app camera.
+android.permission.CAMERA
