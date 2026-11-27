@@ -20,7 +20,7 @@ class Check(
     private val clock: () -> Long = System::currentTimeMillis,
     private val javaHome: File = File(System.getProperty("java.home")),
     private val javaVersion: String = System.getProperty("java.version"),
-    private val deviceActions: (log: (String) -> Unit) -> DeviceActions = { log -> DeviceActions(root, proc, log = log) },
+    private val deviceActions: (log: (String) -> Unit) -> DeviceActions = { log -> DeviceActions(root, proc, log = log, deviceRepo = DeviceActions.configuredRepo(root)) },
 ) {
     val checkDir = File(root, "build/check")
     val lastPass = File(checkDir, "last-pass.txt")
@@ -97,8 +97,10 @@ class Check(
                         Phase.DEPS -> PhaseResult.of(DepsRules.check(DepsRules.depsFile(checkDir), File(root, "config/allowed-dependency-groups.txt")))
                         Phase.UNIT -> unit(seed)
                         Phase.DEVICE -> if (mode == "actions") {
-                            deviceSeed = headSha()?.let { DeviceActions.deviceSeed(it) }
-                            actions()
+                            val r = actions()
+                            // The seed the device tests used: the snapshot's sha in the public test copy, else HEAD's.
+                            deviceSeed = (snapshotSha ?: headSha())?.let { DeviceActions.deviceSeed(it) }
+                            r
                         } else gmd(seed)
                         Phase.DOCS -> PhaseResult.of(DocsRules.check(root))
                     }
@@ -210,9 +212,12 @@ class Check(
         return if (exit != 0 && r.status == Status.PASS) r.copy(status = Status.FAIL, failures = gradleFailure("device")) else r
     }
 
+    private var snapshotSha: String? = null
+
     private fun actions(): PhaseResult {
         val logFile = freshLog("device")
-        return deviceActions { line -> logFile.appendText("$line\n") }.run()
+        val device = deviceActions { line -> logFile.appendText("$line\n") }
+        return device.run().also { snapshotSha = device.snapshotSha }
     }
 
     private fun headSha(): String? = try {
